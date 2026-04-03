@@ -199,38 +199,63 @@
         }
     };
 
-    const fetchAndCopyVoters = async (postId, pollName, optionId, btnElement) => {
-        const originalText = btnElement.innerHTML;
-        btnElement.innerText = '正在获取...';
-        btnElement.classList.add('mh-loading');
+    // ==========================================
+// 4. 业务逻辑 (已修改，支持分页抓取)
+// ==========================================
+const fetchAndCopyVoters = async (postId, pollName, optionId, btnElement) => {
+    const originalText = btnElement.innerHTML;
+    btnElement.classList.add('mh-loading');
 
-        try {
-            const url = `/polls/voters.json?post_id=${postId}&poll_name=${pollName}&option_id=${optionId}&limit=100`;
+    let allVoters = [];
+    let page = 1;
+    let hasMore = true;
+    const PAGE_LIMIT = 50; // 显式设定每页抓取 50 个
+
+    try {
+        while (hasMore) {
+            btnElement.innerText = `正在获取第 ${page} 页...`;
+
+            // 关键修正：必须显式带上 limit=50
+            const url = `/polls/voters.json?post_id=${postId}&poll_name=${pollName}&option_id=${optionId}&page=${page}&limit=${PAGE_LIMIT}`;
             const data = await discourseFetch(url);
-            const voters = (data.voters && data.voters[optionId]) ? data.voters[optionId] : [];
 
-            if (voters.length === 0) {
-                showNotification('无人投票或该投票为匿名投票', 'error');
+            const votersInPage = (data.voters && data.voters[optionId]) ? data.voters[optionId] : [];
+
+            if (votersInPage.length === 0) {
+                hasMore = false;
             } else {
-                const mentions = voters.map(u => `@${u.username}`).join(' ');
-                await copyToClipboard(mentions);
+                allVoters.push(...votersInPage);
 
-                // 成功关闭模态框
-                document.querySelector('.mh-modal-overlay')?.remove();
+                // 只有当拿到的人数正好等于 50 时，才认为可能有下一页
+                if (votersInPage.length < PAGE_LIMIT) {
+                    hasMore = false;
+                } else {
+                    page++;
+                }
+            }
 
-                // 显示成功提示
-                showNotification(`已复制 ${voters.length} 人到剪贴板`, 'success');
-            }
-        } catch (e) {
-            console.error(e);
-            showNotification('获取数据失败', 'error');
-        } finally {
-            if(btnElement) {
-                btnElement.innerHTML = originalText;
-                btnElement.classList.remove('mh-loading');
-            }
+            // 安全限制：防止某些情况下陷入无限循环（比如投票人数极多）
+            if (page > 200) break;
         }
-    };
+
+        if (allVoters.length === 0) {
+            showNotification('无人投票或该投票为匿名投票', 'error');
+        } else {
+            const mentions = allVoters.map(u => `@${u.username}`).join(' ');
+            await copyToClipboard(mentions);
+            document.querySelector('.mh-modal-overlay')?.remove();
+            showNotification(`已成功抓取 ${allVoters.length} 人`, 'success');
+        }
+    } catch (e) {
+        console.error(e);
+        showNotification(e.message || '获取失败', 'error');
+    } finally {
+        if(btnElement) {
+            btnElement.innerHTML = originalText;
+            btnElement.classList.remove('mh-loading');
+        }
+    }
+};
 
     // ==========================================
     // 5. UI 构建 (弹窗)
